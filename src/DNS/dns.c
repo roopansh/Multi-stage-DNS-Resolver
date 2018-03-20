@@ -1,3 +1,4 @@
+// DNS Server side C program
 #include <stdio.h>
 #include <sys/socket.h>
 #include <stdlib.h>
@@ -25,17 +26,18 @@ int main(int argc, char const *argv[]) {
 		exit(EXIT_FAILURE);
 	}
 
-	// Setting options to allow for reuse of the port and dns address
+	// Setting options to allow for reuse of the port and DNS Address
 	if (setsockopt(dns_server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
 		perror("Socket Options Failure : ");
 		exit(EXIT_FAILURE);
 	}
 
+	// Setting the DNS server IP Address and Port
 	dns_address.sin_family = AF_INET;
 	dns_address.sin_addr.s_addr = INADDR_ANY;
 	dns_address.sin_port = htons( PORT );
 
-	// Forcefully attaching socket to the port 8080
+	// Attaching socket to the address & port
 	if (bind(dns_server_fd, (struct sockaddr *)&dns_address, sizeof(dns_address))<0) {
 		perror("Bind Failure : ");
 		exit(EXIT_FAILURE);
@@ -48,21 +50,25 @@ int main(int argc, char const *argv[]) {
 	}
 
 	while(1) {
+		// Accept a connection
 		if ((new_socket = accept(dns_server_fd, (struct sockaddr *)&client_address, (socklen_t*)&client_address))<0) {
 			perror("Socket Accept Failure : ");
 			exit(EXIT_FAILURE);
 		}
 
-		// empty the buffers
+		// empty the current buffers for the new data to be recieved and sent
 		memset(&buffer_in, '\0', 1024);
 		memset(&buffer_out, '\0', 1024);
 
+		// Recieve a message from the other side.
 		message_recvd = read( new_socket , buffer_in, 1024);
 		printf("Request :\tType-%c,\tMessage-%s\n",buffer_in[0], buffer_in+1 );
 
+		// Depending on the type of message recieved, do the needful
 		switch(buffer_in[0]) {
-			// Recvd message contains Domain name, requesting IP address
-			case '1':
+			// Recieved message contains Domain name, requesting IP address
+		case '1':
+			// Scan the database & send the responding message if found in the database
 			found_flag = 0;
 			database_fp = fopen("database.csv","r");
 			while(fscanf(database_fp, "%[^,],%[^\n]\n", domain_name, ip_address) != -1){
@@ -75,6 +81,8 @@ int main(int argc, char const *argv[]) {
 				}
 			}
 			fclose(database_fp);
+
+			// If not found in the database, then send a not found message
 			if (found_flag == 0) {
 				strcpy(buffer_out, "4Entry not found in the database");
 				send(new_socket, buffer_out, strlen(buffer_out), 0);
@@ -82,7 +90,8 @@ int main(int argc, char const *argv[]) {
 			break;
 
 			// Recvd message contains IP address, requesting Domain name
-			case '2':
+		case '2':
+			// Scan the database & send the responding message if found in the database
 			found_flag = 0;
 			database_fp = fopen("database.csv","r");
 			while(fscanf(database_fp, "%[^,],%[^\n]\n", domain_name, ip_address) != -1){
@@ -95,13 +104,16 @@ int main(int argc, char const *argv[]) {
 				}
 			}
 			fclose(database_fp);
+
+			// If not found in the database, then send a not found message
 			if (found_flag == 0){
 				strcpy(buffer_out, "4Entry not found in the database");
 				send(new_socket, buffer_out, strlen(buffer_out), 0);
 			}
 			break;
-			default:
-				// If the message is incorrect format, then send error type message.
+
+		default:
+			// If the message is incorrect format, then send error type message.
 			strcpy(buffer_out, "4Wrong Packet Format");
 			send(new_socket, buffer_out, strlen(buffer_out) , 0 );
 			fprintf(stderr, "%s\n", "Wrong Packet Format Recvd");

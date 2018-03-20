@@ -1,10 +1,11 @@
+// Server side C/C++ program to demonstrate Socket programming
 #include <stdio.h>
 #include <sys/socket.h>
 #include <stdlib.h>
 #include <netinet/in.h>
 #include <string.h>
 #include <arpa/inet.h>
-#define PORT 8080
+#include <unistd.h>
 
 struct queue
 {
@@ -13,13 +14,13 @@ struct queue
     struct queue * next;
 };
 
-struct queue * CACHE_HEAD;
+struct queue * cache_head;
 
 int find_entry_in_cache(char *x) {
     int type = x[0]-'0';
     char message[1023];
     strcpy(message, x+1);
-    struct queue *ptr = CACHE_HEAD;
+    struct queue *ptr = cache_head;
     while (ptr != NULL){
         if (type == 2 && strcmp(message, ptr->ip_address)==0) {
             return 1;
@@ -36,7 +37,7 @@ void get_entry_in_cache(char *x, char *y) {
     char message[1023];
     strcpy(message, x+1);
 
-    struct queue *ptr = CACHE_HEAD;
+    struct queue *ptr = cache_head;
     while (ptr != NULL){
         if (type == 2 && strcmp(message, ptr->ip_address)==0) {
             strcpy(y, "3");
@@ -61,7 +62,21 @@ void empty(char * x)
 
 int main(int argc, char const *argv[])
 {
-    CACHE_HEAD=NULL;
+
+    switch (argc ){
+        case 2:
+            break;
+        default:
+            fprintf(stderr, "%s\n", "Usage : ./proxy <port>");
+            exit(1);
+            break;
+    }
+
+    //declaring cache
+
+    char * PORT = argv[1];
+
+    cache_head=NULL;
 
     int server_fd, new_socket, valread;
     struct sockaddr_in address;int dns_sock=0;
@@ -85,10 +100,10 @@ int main(int argc, char const *argv[])
     memset(&dns_serv_addr, '0', sizeof(dns_serv_addr));
 
     dns_serv_addr.sin_family = AF_INET;
-    dns_serv_addr.sin_port = htons(PORT);
+    dns_serv_addr.sin_port = htons(8080);
 
     // Convert IPv4 and IPv6 addresses from text to binary form
-    if(inet_pton(AF_INET, "192.168.31.136", &dns_serv_addr.sin_addr)<=0)
+    if(inet_pton(AF_INET, "172.16.114.163", &dns_serv_addr.sin_addr)<=0)
     {
         printf("\nInvalid address/ Address not supported \n");
         return -1;
@@ -99,6 +114,8 @@ int main(int argc, char const *argv[])
         printf("\nConnection with DNS Failed \n");
         return -1;
     }
+
+    close(dns_sock);
 
     /*-------------------------------------*/
 
@@ -122,7 +139,7 @@ int main(int argc, char const *argv[])
 
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons( PORT );
+    address.sin_port = htons( atoi(PORT) );
 
     // Forcefully attaching socket to the port 8080
     if (bind(server_fd, (struct sockaddr *)&address,
@@ -145,6 +162,8 @@ int main(int argc, char const *argv[])
             exit(EXIT_FAILURE);
         }
         valread = read( new_socket , buffer, 1024);
+        printf("Request :\tType-%c,\tMessage-%s\n",buffer[0], buffer+1 );
+
         if(buffer[0]=='1'||buffer[0]=='2')
         {
             if(find_entry_in_cache(buffer))
@@ -154,10 +173,11 @@ int main(int argc, char const *argv[])
                 send(new_socket , returnbuffer , strlen(returnbuffer) , 0 );
                 empty(returnbuffer);
                 close(new_socket);
+            	printf("CACHE\n");
             }
             else
             {
-                printf("%s\n",buffer);
+                // printf("%s\n",buffer);
                 int var=buffer[0]=='1'?1:0;
                 int i;
                 struct queue * temp;
@@ -167,36 +187,7 @@ int main(int argc, char const *argv[])
                 if(buffer[0]=='1')for(i=1;i<strlen(buffer);i++)temp->domain_name[i-1]=buffer[i];
                 else    for(i=1;i<strlen(buffer);i++)temp->ip_address[i-1]=buffer[i];
 
-                send(dns_sock , buffer , strlen(buffer) , 0 );
-                empty(buffer);
-                valread = read( dns_sock , buffer, 1024);
-                close(dns_sock);
-                printf("%s\n",buffer);
-
-                if(buffer[0]=='3')
-                {
-                    if(var) for(i=1;i<strlen(buffer);i++)temp->ip_address[i-1]=buffer[i];
-                    else for(i=1;i<strlen(buffer);i++)temp->domain_name[i-1]=buffer[i];
-                    int size=0;
-                    temp->next=CACHE_HEAD;
-                    CACHE_HEAD=temp;
-
-                    struct queue * current=CACHE_HEAD;
-                    while(current->next!=NULL){current=current->next;size++;}
-                    if(size>=3)
-                    {
-                    free(current);
-                    current=CACHE_HEAD;
-                    current->next->next->next=NULL;
-                    }
-                }
-                else free(temp);
-
-                send(new_socket ,buffer , strlen(buffer) , 0 );
-                close(new_socket);
-                empty(buffer);
-
-                if ((dns_sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+                 if ((dns_sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
                 {
                     printf("\n Socket creation error \n");
                     return -1;
@@ -208,6 +199,36 @@ int main(int argc, char const *argv[])
                     return -1;
                 }
 
+                send(dns_sock , buffer , strlen(buffer) , 0 );
+                empty(buffer);
+                valread = read( dns_sock , buffer, 1024);
+                close(dns_sock);
+                // printf("%s\n",buffer);
+
+                if(buffer[0]=='3')
+                {
+                    if(var) for(i=1;i<strlen(buffer);i++)temp->ip_address[i-1]=buffer[i];
+                    else for(i=1;i<strlen(buffer);i++)temp->domain_name[i-1]=buffer[i];
+                    int size=0;
+                    temp->next=cache_head;
+                    cache_head=temp;
+
+                    struct queue * current=cache_head;
+                    while(current->next!=NULL){current=current->next;size++;}
+                    if(size>=3)
+                    {
+                    free(current);
+                    current=cache_head;
+                    current->next->next->next=NULL;
+                    }
+                    printf("UPDATE CACHE\n");
+                }
+                else free(temp);
+
+                send(new_socket ,buffer , strlen(buffer) , 0 );
+                close(new_socket);
+                printf("Response :\tType-%c,\tMessage-%s\n", buffer[0], buffer+1);
+                empty(buffer);
             }
         }
         else
@@ -217,18 +238,6 @@ int main(int argc, char const *argv[])
             send(new_socket ,buffer , strlen(buffer) , 0 );
             close(new_socket);
             empty(buffer);
-            if ((dns_sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-            {
-                printf("\n Socket creation error \n");
-                return -1;
-            }
-
-            if (connect(dns_sock, (struct sockaddr *)&dns_serv_addr, sizeof(dns_serv_addr)) < 0)
-            {
-                printf("\nConnection with DNS Failed \n");
-                return -1;
-            }
-
         }
 
     }
